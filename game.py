@@ -1,5 +1,14 @@
 """
 Mana Duel — two wizards drain a shared ley-line network.
+
+Rules:
+- The network is a graph of nodes, each holding a mana value.
+- On your turn you "channel" any node adjacent to the last-channeled node
+  (the first move can be any node), remove it from the graph, and add its
+  value to your score.
+- If the current node has no un-channeled neighbors left, that player is
+  cut off and the game ends.
+- Eval function = score differential (P1 score - P2 score), not just win/lose.
 """
 
 import math
@@ -55,24 +64,69 @@ class ManaDuel:
 def draw_ascii_map(values, removed, current):
     """Draws the map directly in the terminal using ASCII text."""
     
+    # Helper function to format a single node
     def format_node(node_name):
         if node_name in removed and node_name != current:
-            return " [X] "  
+            return " [X] "  # Crossed out / removed
         elif node_name == current:
-            return f"<{node_name}:{values[node_name]}>" 
+            return f"<{node_name}:{values[node_name]}>" # Current location
         else:
-            return f" {node_name}:{values[node_name]} " 
+            return f" {node_name}:{values[node_name]} " # Available to move
             
+    # Format all nodes to exactly 5 characters wide for alignment
     n = {k: format_node(k) for k in values.keys()}
     
     print("\n--- CURRENT BOARD MAP ---")
-    print(f"         {n['A']}                              {n['F']}-------{n['G']}")
-    print( "       /       \\                            |           |")
-    print(f"  {n['B']}---------{n['C']}-------{n['D']}-------{n['E']}-------{n['H']}")
+    print(f"        {n['E']}")
+    print( "          |")
+    print(f"        {n['B']}")
+    print( "          |")
+    print(f"        {n['A']} --- {n['D']}")
+    print( "          |             |")
+    print(f"        {n['C']} --- {n['F']}")
+    print( "          |             |")
+    print(f"        {n['G']} -------------+")
     print("-------------------------\n")
 
 
+def play_game(graph, values, verbose=True):
+    game = ManaDuel(graph, values)
+    removed = frozenset()
+    current = None
+    scores = [0, 0]
+    turn = 0
+    names = ["Player 1", "Player 2"]
+
+    while True:
+        draw_ascii_map(values, removed, current)
+
+        moves = game.get_moves(removed, current)
+        if not moves:
+            if verbose:
+                print(f"{names[turn]} is cut off — no reachable nodes left.")
+            break
+
+        _, best_move = game.minimax(removed, current, tuple(scores), turn, -math.inf, math.inf)
+        scores[turn] += values[best_move]
+        removed = removed | {best_move}
+        if verbose:
+            print(f"{names[turn]} channels '{best_move}' (+{values[best_move]} mana) "
+                  f"-> P1={scores[0]}, P2={scores[1]}")
+        current = best_move
+        turn = 1 - turn
+
+    winner = "Player 1" if scores[0] > scores[1] else ("Player 2" if scores[1] > scores[0] else "Tie")
+    if verbose:
+        print(f"\nFinal Scores -> P1: {scores[0]}, P2: {scores[1]}")
+        print(f"Winner: {winner}")
+    
+    return scores, winner
+
+
 def play_human_vs_ai(graph, values, human_turn=0):
+    """
+    human_turn: 0 -> human is Player 1 (moves first), 1 -> human is Player 2
+    """
     game = ManaDuel(graph, values)
     removed = frozenset()
     current = None
@@ -93,7 +147,7 @@ def play_human_vs_ai(graph, values, human_turn=0):
             print(f"Available moves: {moves}")
             choice = None
             while choice not in moves:
-                choice = input(f"{names[turn]}, channel a node: ").strip().upper() 
+                choice = input(f"{names[turn]}, channel a node: ").strip().upper() # Auto uppercase
             move = choice
         else:
             _, move = game.minimax(removed, current, tuple(scores), turn, -math.inf, math.inf)
@@ -113,45 +167,26 @@ def play_human_vs_ai(graph, values, human_turn=0):
     return scores, winner
 
 
-def play_game(graph, values, verbose=True):
-    # (Kept just in case you want AI vs AI mode)
-    game = ManaDuel(graph, values)
-    removed = frozenset()
-    current = None
-    scores = [0, 0]
-    turn = 0
-    names = ["Player 1", "Player 2"]
-
-    while True:
-        draw_ascii_map(values, removed, current)
-        moves = game.get_moves(removed, current)
-        if not moves:
-            break
-        _, best_move = game.minimax(removed, current, tuple(scores), turn, -math.inf, math.inf)
-        scores[turn] += values[best_move]
-        removed = removed | {best_move}
-        current = best_move
-        turn = 1 - turn
-
-    return scores
-
-
 if __name__ == "__main__":
-    # The "Zugzwang Bridge" ley-line network
+    # The "Bait and Trap" ley-line network
     graph = {
-        'A': ['B', 'C'],
-        'B': ['A', 'C'],
-        'C': ['A', 'B', 'D'],
-        'D': ['C', 'E'],        # The Choke Point Bridge!
-        'E': ['D', 'F', 'H'],
-        'F': ['E', 'G'],
-        'G': ['F', 'H'],
-        'H': ['E', 'G']
+        'A': ['B', 'C', 'D'],
+        'B': ['A', 'E'],
+        'C': ['A', 'F', 'G'],
+        'D': ['A', 'F'],
+        'E': ['B'],          # The dead-end!
+        'F': ['C', 'D', 'G'],
+        'G': ['C', 'F']
     }
-    values = {'A': 4, 'B': 5, 'C': 2, 'D': 1, 'E': 3, 'F': 8, 'G': 9, 'H': 6}
+    values = {'A': 2, 'B': 7, 'C': 5, 'D': 6, 'E': 1, 'F': 8, 'G': 3}
 
     print("Ley-line network loaded.")
 
-    pick = input("Play as Player 1 (moves first) or Player 2? [1/2]: ").strip()
-    human_turn = 0 if pick == "1" else 1
-    play_human_vs_ai(graph, values, human_turn)
+    mode = input("\nChoose mode: (1) AI vs AI  (2) Human vs AI: ").strip()
+    if mode == "2":
+        pick = input("Play as Player 1 (moves first) or Player 2? [1/2]: ").strip()
+        human_turn = 0 if pick == "1" else 1
+        play_human_vs_ai(graph, values, human_turn)
+    else:
+        play_game(graph, values)
+        

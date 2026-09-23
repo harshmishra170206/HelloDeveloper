@@ -1,0 +1,243 @@
+Jenkins CI/CD Lab - Step-by-Step Solutions
+==========================================
+
+---------------------------------------------------------
+Question 1: Basic CI Pipeline with Post Actions
+---------------------------------------------------------
+1. Files to Create in Repository:
+   - requirements.txt:
+     pytest
+
+   - app.py:
+     def multiply(a, b):
+         return a * b
+     def divide(a, b):
+         return a / b
+
+   - test_app.py:
+     from app import multiply, divide
+     def test_multiply():
+         assert multiply(2, 3) == 6
+     def test_divide():
+         assert divide(6, 2) == 3
+
+   - Jenkinsfile:
+     pipeline {
+         agent any
+         stages {
+             stage('Checkout') {
+                 steps { checkout scm }
+             }
+             stage('Install Dependencies') {
+                 steps { bat 'pip install -r requirements.txt' }
+             }
+             stage('Run Unit Tests') {
+                 steps { bat 'pytest' }
+             }
+         }
+         post {
+             success { echo 'Build succeeded! All tests passed.' }
+             failure { echo 'Build failed! Please check the test logs.' }
+         }
+     }
+
+2. Execution:
+   - Run the build once in Jenkins. It will pass and print "Build succeeded!".
+   - Break multiply logic (e.g., return a + b), push, and rebuild. 
+   - The test stage fails, and the post block prints "Build failed!".
+
+
+---------------------------------------------------------
+Question 2: Parameterized Testing and Verbose Output
+---------------------------------------------------------
+1. Files to Create in Repository:
+   - app.py:
+     def find_min(numbers): return min(numbers)
+     def count_odds(numbers): return sum(1 for n in numbers if n % 2 != 0)
+
+   - test_app.py:
+     import pytest
+     from app import find_min, count_odds
+     
+     @pytest.mark.parametrize("numbers, expected", [([1, 2, 3], 1), ([5, -1, 10], -1), ([0, 0, 0], 0)])
+     def test_find_min(numbers, expected): assert find_min(numbers) == expected
+     
+     @pytest.mark.parametrize("numbers, expected", [([1, 2, 3], 2), ([2, 4, 6], 0), ([1, 3, 5], 3)])
+     def test_count_odds(numbers, expected): assert count_odds(numbers) == expected
+
+   - Jenkinsfile:
+     pipeline {
+         agent any
+         stages {
+             stage('Checkout') { steps { checkout scm } }
+             stage('Install Dependencies') { steps { bat 'pip install pytest' } }
+             stage('Run Unit Tests') { steps { bat 'pytest -v' } }
+         }
+     }
+
+2. Execution:
+   - Run the build. 6 tests will run because the 2 test functions each have 3 parameters.
+   - Add a wrong expected value in test_app.py, push, and rebuild.
+   - The verbose output (-v) will show exactly 1 case failing and 5 passing.
+
+
+---------------------------------------------------------
+Question 3: Environment Variables and Manual Approvals
+---------------------------------------------------------
+1. Files to Create in Repository:
+   - app.py:
+     print("Application is running!")
+
+   - Jenkinsfile:
+     pipeline {
+         agent any
+         environment {
+             APP_NAME = 'MyCoolApp'
+             APP_VERSION = '1.0.0'
+         }
+         stages {
+             stage('Checkout') { steps { checkout scm } }
+             stage('Build') { steps { bat 'python -m py_compile app.py' } }
+             stage('Deploy') {
+                 steps {
+                     input message: "Approve deployment of ${env.APP_NAME} version ${env.APP_VERSION}?", ok: "Release"
+                     bat 'python app.py'
+                 }
+             }
+         }
+     }
+
+2. Execution:
+   - Run the build. It pauses at 'Deploy'. Click "Release" -> prints "Application is running!".
+   - Run again, click "Abort" -> pipeline stops immediately without running the app.
+
+
+---------------------------------------------------------
+Question 4: Build Information and Linters
+---------------------------------------------------------
+1. Files to Create in Repository:
+   - requirements.txt:
+     flake8
+
+   - app.py:
+     def greet(name):
+         return f"Hello, {name}"
+
+   - Jenkinsfile:
+     pipeline {
+         agent any
+         stages {
+             stage('Checkout') { steps { checkout scm } }
+             stage('Show Build Info') {
+                 steps {
+                     echo "Build Number: ${env.BUILD_NUMBER}"
+                     echo "Job Name: ${env.JOB_NAME}"
+                     echo "Workspace: ${env.WORKSPACE}"
+                 }
+             }
+             stage('Run Linter') {
+                 steps {
+                     bat 'pip install flake8'
+                     bat 'flake8 app.py'
+                 }
+             }
+         }
+     }
+
+2. Execution:
+   - Run twice. BUILD_NUMBER increments; JOB_NAME and WORKSPACE stay the same.
+   - Add `import os` to app.py without using it. Rebuild. Flake8 fails with "imported but unused" error.
+
+
+---------------------------------------------------------
+Question 5: Pipeline Parameters and Conditionals
+---------------------------------------------------------
+1. Jenkinsfile:
+   pipeline {
+       agent any
+       parameters {
+           choice(name: 'ENVIRONMENT', choices: ['dev', 'staging', 'prod'], description: 'Select env')
+           booleanParam(name: 'RUN_EXTRA_CHECK', defaultValue: false, description: 'Run check?')
+       }
+       stages {
+           stage('Checkout') { steps { checkout scm } }
+           stage('Show Parameter') { steps { echo "Deploying to: ${params.ENVIRONMENT}" } }
+           stage('Extra Check') {
+               when { expression { params.RUN_EXTRA_CHECK == true } }
+               steps { echo "Running extra check." }
+           }
+       }
+   }
+
+2. Execution:
+   - The first run just says "Build Now" because Jenkins must read the script once to configure parameters.
+   - Run with the checkbox checked: "Extra Check" stage executes.
+   - Run with checkbox unchecked: "Extra Check" stage is skipped in the pipeline view.
+
+
+---------------------------------------------------------
+Question 6: Parallel Execution and Artifacts
+---------------------------------------------------------
+1. Files to Create in Repository:
+   - frontend_check.py:
+     import time; time.sleep(4)
+     with open('frontend_report.txt', 'w') as f: f.write('Frontend passed.')
+     
+   - backend_check.py:
+     import time; time.sleep(4)
+     with open('backend_report.txt', 'w') as f: f.write('Backend passed.')
+
+   - Jenkinsfile:
+     pipeline {
+         agent any
+         stages {
+             stage('Checkout') { steps { checkout scm } }
+             stage('Parallel Checks') {
+                 parallel {
+                     stage('Frontend') { steps { bat 'python frontend_check.py' } }
+                     stage('Backend') { steps { bat 'python backend_check.py' } }
+                 }
+             }
+             stage('Archive Reports') {
+                 steps { archiveArtifacts artifacts: '*_report.txt' }
+             }
+         }
+     }
+
+2. Execution:
+   - Total time is ~4 seconds since both 4-second scripts run at the same time. Sequential would take 8s.
+   - After a second build, navigate to the first build's page; the `.txt` artifact files are still stored and available.
+
+
+---------------------------------------------------------
+Question 7: Milestones and Notifications
+---------------------------------------------------------
+1. Files to Create in Repository:
+   - app.py:
+     print("Building application...")
+
+   - Jenkinsfile:
+     pipeline {
+         agent any
+         stages {
+             stage('Checkout') { steps { checkout scm } }
+             stage('Build') {
+                 steps {
+                     bat 'python -m py_compile app.py'
+                     sleep time: 15, unit: 'SECONDS'
+                     milestone(1)
+                 }
+             }
+             stage('Send Notification') {
+                 steps {
+                     echo "To: dev@example.com"
+                     echo "Subject: ${env.JOB_NAME} Build #${env.BUILD_NUMBER}"
+                     echo "Body: Review at ${env.BUILD_URL}"
+                 }
+             }
+         }
+     }
+
+2. Execution:
+   - Click Build Now twice rapidly. The older build gets aborted automatically because the newer build enters the queue and overtakes it via the milestone marker. No email is sent for the older build.
+   - Add a syntax error to app.py. The build fails at py_compile, stops execution, and never reaches the notification stage.
